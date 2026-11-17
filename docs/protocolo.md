@@ -87,13 +87,38 @@ Uma RESPOSTA OK sem explicação seria `00000008 0a 00000001 00 0000`.
 
 ## Delimitação no fluxo TCP
 
-O TCP entrega um fluxo de bytes. Uma leitura pode trazer parte do prefixo,
-parte do conteúdo ou vários quadros juntos. O receptor deve acumular bytes
-até ter os 4 bytes do prefixo, ler e validar o tamanho declarado e continuar
-acumulando até ter exatamente aquele número de bytes de conteúdo após o
-prefixo. Então pode passar o quadro completo para `decodificar` e manter os
-bytes que sobrarem no buffer para o próximo quadro. Se a conexão terminar
-com um quadro parcial no buffer, o quadro está truncado.
+O TCP garante a ordem dos bytes no fluxo e pode dividir ou juntar os dados
+de escritas distintas em uma leitura. Uma leitura pode trazer parte do
+prefixo, parte do conteúdo ou vários quadros juntos.
+
+`AcumuladorQuadros.alimentar(dados)` recebe um bloco de bytes e produz
+mensagens em ordem. Enquanto o iterador é consumido, o acumulador junta os
+primeiros 4 bytes, valida o tamanho declarado e espera até ter esse número
+de bytes após o prefixo. Ao completar um quadro, chama `decodificar` e
+continua com os bytes restantes do bloco. Entre chamadas, o buffer guarda
+apenas o quadro parcial, limitado pelo tamanho máximo do protocolo.
+
+A biblioteca cliente e o broker devem criar um acumulador por conexão TCP,
+reutilizá-lo a cada leitura e consumir o iterador até o fim antes de passar
+o próximo bloco. Ao detectar o fim da conexão, devem chamar `finalizar()`.
+Um prefixo inválido, um quadro malformado ou um fim de fluxo com quadro
+parcial gera `ErroProtocolo`. O erro invalida o acumulador daquela conexão.
+Se um bloco contiver quadros válidos antes de um erro, o iterador os
+entrega antes de sinalizar o erro.
+
+```python
+from shared.protocolo import AcumuladorQuadros, Operacao, codificar
+
+acumulador = AcumuladorQuadros()
+primeiro = codificar(Operacao.IDENTIFICAR, 1, cliente_id="s1")
+segundo = codificar(Operacao.INSCREVER, 2, topico="sala")
+
+for bloco in (primeiro[:2], primeiro[2:] + segundo):
+    for mensagem in acumulador.alimentar(bloco):
+        print(mensagem.operacao.name, mensagem.campos)
+
+acumulador.finalizar()
+```
 
 ## Uso em Python
 

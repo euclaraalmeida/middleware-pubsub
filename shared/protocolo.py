@@ -1,7 +1,8 @@
-"""Codificação e decodificação de quadros do protocolo Publish/Subscribe."""
+"""Codificação, decodificação e acumulação de quadros Publish/Subscribe."""
 
 import math
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum
 from uuid import UUID
@@ -180,3 +181,58 @@ def decodificar(quadro):
     if posicao != len(quadro):
         raise ErroProtocolo("Bytes excedentes após os campos da mensagem")
     return Mensagem(operacao, id_solicitacao, campos)
+
+
+class AcumuladorQuadros:
+    """Reconstrói os quadros de um único fluxo a partir de blocos de bytes."""
+
+    def __init__(self):
+        self._buffer = bytearray()
+        self._tamanho_quadro = None
+        self._falhou = False
+
+    def alimentar(self, dados: bytes) -> Iterator[Mensagem]:
+        """Produz mensagens em ordem. Consuma o iterador antes de alimentar novamente."""
+        if self._falhou:
+            raise ErroProtocolo("O acumulador está inválido após um erro no fluxo")
+        if not isinstance(dados, bytes):
+            raise TypeError("O bloco deve ser do tipo bytes")
+
+        posicao = 0
+        tamanho_prefixo = TAMANHO_CONTEUDO.size
+        try:
+            while posicao < len(dados):
+                if self._tamanho_quadro is None:
+                    fim = posicao + tamanho_prefixo - len(self._buffer)
+                    self._buffer.extend(dados[posicao:fim])
+                    if len(self._buffer) < tamanho_prefixo:
+                        return
+                    (tamanho,) = TAMANHO_CONTEUDO.unpack(self._buffer)
+                    if not CABECALHO.size <= tamanho <= MAX_CONTEUDO:
+                        raise ErroProtocolo("Tamanho de conteúdo fora dos limites")
+                    self._tamanho_quadro = tamanho_prefixo + tamanho
+                    posicao = fim
+
+                fim = posicao + self._tamanho_quadro - len(self._buffer)
+                self._buffer.extend(dados[posicao:fim])
+                if len(self._buffer) < self._tamanho_quadro:
+                    return
+
+                mensagem = decodificar(bytes(self._buffer))
+                self._buffer.clear()
+                self._tamanho_quadro = None
+                posicao = fim
+                yield mensagem
+        except ErroProtocolo:
+            self._falhou = True
+            self._buffer.clear()
+            raise
+
+    def finalizar(self) -> None:
+        """Verifica se o fim do fluxo ocorreu no limite de um quadro."""
+        if self._falhou:
+            raise ErroProtocolo("O acumulador está inválido após um erro no fluxo")
+        if self._buffer:
+            self._falhou = True
+            self._buffer.clear()
+            raise ErroProtocolo("Fim do fluxo com quadro incompleto")

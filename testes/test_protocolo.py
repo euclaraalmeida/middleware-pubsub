@@ -2,6 +2,7 @@ import unittest
 from uuid import UUID
 
 from shared.protocolo import (
+    AcumuladorQuadros,
     MAX_CONTEUDO,
     MAX_ID_SOLICITACAO,
     MAX_TEXTO,
@@ -137,6 +138,86 @@ class TestProtocolo(unittest.TestCase):
             with self.subTest(quadro=quadro.hex()):
                 with self.assertRaises(ErroProtocolo):
                     decodificar(quadro)
+
+
+class TestAcumuladorQuadros(unittest.TestCase):
+    def setUp(self):
+        self.quadros = [
+            codificar(Operacao.IDENTIFICAR, 1, cliente_id="s1"),
+            codificar(Operacao.ENTREGAR, 0, uuid=UUID_PUBLICACAO, topico="névoa", temperatura=-12.5),
+            codificar(Operacao.RESPOSTA, 2, resultado=Resultado.OK, mensagem="inscrição aceita"),
+        ]
+        self.mensagens = [decodificar(quadro) for quadro in self.quadros]
+        self.acumulador = AcumuladorQuadros()
+
+    def test_quadro_completo(self):
+        self.assertEqual(list(self.acumulador.alimentar(self.quadros[0])), self.mensagens[:1])
+        self.acumulador.finalizar()
+
+    def test_quadro_em_dois_fragmentos(self):
+        quadro = self.quadros[1]
+        for corte in range(1, len(quadro)):
+            with self.subTest(corte=corte):
+                acumulador = AcumuladorQuadros()
+                self.assertEqual(list(acumulador.alimentar(quadro[:corte])), [])
+                self.assertEqual(list(acumulador.alimentar(quadro[corte:])), self.mensagens[1:2])
+                acumulador.finalizar()
+
+    def test_quadro_byte_a_byte(self):
+        quadro = self.quadros[1]
+        for byte in quadro[:-1]:
+            self.assertEqual(list(self.acumulador.alimentar(bytes([byte]))), [])
+        self.assertEqual(list(self.acumulador.alimentar(quadro[-1:])), self.mensagens[1:2])
+
+    def test_quadros_concatenados_preservam_ordem_e_campos(self):
+        self.assertEqual(
+            list(self.acumulador.alimentar(b"".join(self.quadros))), self.mensagens
+        )
+        self.acumulador.finalizar()
+
+    def test_quadro_completo_seguido_de_parcial(self):
+        primeiro, segundo, _ = self.quadros
+        self.assertEqual(
+            list(self.acumulador.alimentar(primeiro + segundo[:2])), self.mensagens[:1]
+        )
+        self.assertEqual(list(self.acumulador.alimentar(b"")), [])
+        self.assertEqual(
+            list(self.acumulador.alimentar(segundo[2:])), self.mensagens[1:2]
+        )
+
+    def test_resto_de_quadro_seguido_de_novos_quadros(self):
+        primeiro, segundo, terceiro = self.quadros
+        self.assertEqual(list(self.acumulador.alimentar(primeiro[:-1])), [])
+        self.assertEqual(
+            list(self.acumulador.alimentar(primeiro[-1:] + segundo + terceiro)),
+            self.mensagens,
+        )
+
+    def test_rejeita_prefixos_invalidos_assim_que_completos(self):
+        for tamanho in (0, 4, MAX_CONTEUDO + 1, 0xFFFFFFFF):
+            with self.subTest(tamanho=tamanho):
+                acumulador = AcumuladorQuadros()
+                prefixo = tamanho.to_bytes(4, "big")
+                self.assertEqual(list(acumulador.alimentar(prefixo[:3])), [])
+                with self.assertRaisesRegex(ErroProtocolo, "fora dos limites"):
+                    list(acumulador.alimentar(prefixo[3:]))
+
+    def test_quadro_malformado_interrompe_fluxo_apos_mensagens_validas(self):
+        malformado = quadro_de_teste(bytes.fromhex("01 00000001 0001 ff"))
+        mensagens = self.acumulador.alimentar(self.quadros[0] + malformado + self.quadros[1])
+        self.assertEqual(next(mensagens), self.mensagens[0])
+        with self.assertRaisesRegex(ErroProtocolo, "UTF-8 inválido"):
+            next(mensagens)
+        with self.assertRaises(ErroProtocolo):
+            list(self.acumulador.alimentar(self.quadros[1]))
+
+    def test_fim_do_fluxo_com_quadro_incompleto(self):
+        for corte in (2, 4, 7):
+            with self.subTest(corte=corte):
+                acumulador = AcumuladorQuadros()
+                self.assertEqual(list(acumulador.alimentar(self.quadros[0][:corte])), [])
+                with self.assertRaisesRegex(ErroProtocolo, "quadro incompleto"):
+                    acumulador.finalizar()
 
 
 if __name__ == "__main__":
