@@ -21,9 +21,9 @@ class TestPublicador(unittest.TestCase):
         self.addCleanup(self.cliente.fechar)
         self.conexao = Mock()
         self.abrir_conexao = self.enterContext(
-            patch("client.publicador.socket.create_connection", return_value=self.conexao)
+            patch("client.conexao.socket.create_connection", return_value=self.conexao)
         )
-        self.enterContext(patch("client.publicador.monotonic", return_value=100))
+        self.enterContext(patch("client.conexao.monotonic", return_value=100))
 
     def quadros_enviados(self):
         return [
