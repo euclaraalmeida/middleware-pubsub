@@ -5,6 +5,7 @@ import socket
 import socketserver
 import sqlite3
 import threading
+from time import monotonic
 
 from shared.protocolo import (
     CABECALHO,
@@ -21,6 +22,7 @@ from .armazenamento import Armazenamento
 
 
 LOG = logging.getLogger(__name__)
+TEMPO_REENVIO = 5
 
 
 def _receber_exatamente(conexao, quantidade, encerrando, permitir_fim=False):
@@ -55,18 +57,29 @@ def _receber_mensagem(conexao, encerrando):
 class _ServidorTCP(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
-    def __init__(self, endereco, armazenamento):
+    def __init__(self, endereco, armazenamento, tempo_reenvio):
         self.armazenamento = armazenamento
+        self.tempo_reenvio = tempo_reenvio
         self.clientes = {}
         self.conexoes = set()
         self.trava = threading.Lock()
         self.encerrando = threading.Event()
         super().__init__(endereco, _Conexao)
 
+    def avisar_entregas(self):
+        with self.trava:
+            clientes = list(self.clientes.values())
+        for cliente in clientes:
+            cliente._acordar_envio.set()
+
 
 class _Conexao(socketserver.BaseRequestHandler):
     def handle(self):
         self.cliente_id = None
+        self._trava_envio = threading.Lock()
+        self._parar_envio = threading.Event()
+        self._acordar_envio = threading.Event()
+        self._emissor = None
         # Acorda periodicamente para encerrar, sem desconectar clientes ociosos.
         self.request.settimeout(0.2)
         with self.server.trava:
@@ -86,13 +99,22 @@ class _Conexao(socketserver.BaseRequestHandler):
         except sqlite3.Error:
             LOG.exception("Falha no armazenamento; encerrando conexao")
         finally:
+            self._parar_envio.set()
+            self._acordar_envio.set()
+            if self._emissor is not None:
+                self._emissor.join()
             with self.server.trava:
-                if self.server.clientes.get(self.cliente_id) is self.request:
+                if self.server.clientes.get(self.cliente_id) is self:
                     del self.server.clientes[self.cliente_id]
                 self.server.conexoes.discard(self.request)
 
+    def _enviar(self, quadro):
+        # Respostas e entregas compartilham o socket, mas nunca os bytes de um quadro.
+        with self._trava_envio:
+            self.request.sendall(quadro)
+
     def _responder(self, mensagem, resultado, texto=""):
-        self.request.sendall(
+        self._enviar(
             codificar(
                 Operacao.RESPOSTA, mensagem.id_solicitacao,
                 resultado=resultado, mensagem=texto,
@@ -101,7 +123,7 @@ class _Conexao(socketserver.BaseRequestHandler):
 
     def _recusar(self, mensagem, texto):
         if mensagem.operacao == Operacao.PUBLICAR:
-            self.request.sendall(
+            self._enviar(
                 codificar(
                     Operacao.ACK_PUBLICACAO, mensagem.id_solicitacao,
                     uuid=mensagem.campos["uuid"],
@@ -113,11 +135,18 @@ class _Conexao(socketserver.BaseRequestHandler):
 
     def _tratar(self, mensagem):
         operacao = mensagem.operacao
+        if operacao == Operacao.ACK_ENTREGA:
+            if self.cliente_id is None or mensagem.campos["cliente_id"] != self.cliente_id:
+                raise ErroProtocolo("ACK de entrega nao pertence a esta conexao")
+            self.server.armazenamento.confirmar_entrega(
+                mensagem.campos["uuid"], self.cliente_id,
+            )
+            self._acordar_envio.set()
+            return
         if operacao in (
-            Operacao.ENTREGAR, Operacao.ACK_ENTREGA,
-            Operacao.ACK_PUBLICACAO, Operacao.RESPOSTA,
+            Operacao.ENTREGAR, Operacao.ACK_PUBLICACAO, Operacao.RESPOSTA,
         ):
-            raise ErroProtocolo("Operacao nao recebida nesta etapa do servidor")
+            raise ErroProtocolo("Operacao no sentido incorreto da conexao")
 
         if operacao == Operacao.IDENTIFICAR:
             self._identificar(mensagem)
@@ -127,8 +156,37 @@ class _Conexao(socketserver.BaseRequestHandler):
             criado = self.server.armazenamento.criar_topico(mensagem.campos["topico"])
             resultado = Resultado.OK if criado else Resultado.TOPICO_JA_EXISTENTE
             self._responder(mensagem, resultado)
+        elif operacao == Operacao.INSCREVER:
+            try:
+                self.server.armazenamento.inscrever(self.cliente_id, mensagem.campos["topico"])
+                resultado = Resultado.OK
+            except sqlite3.IntegrityError:
+                resultado = Resultado.TOPICO_INEXISTENTE
+            self._responder(mensagem, resultado)
+            self._acordar_envio.set()
+        elif operacao == Operacao.CANCELAR_INSCRICAO:
+            resultado = self.server.armazenamento.cancelar_inscricao(
+                self.cliente_id, mensagem.campos["topico"],
+            )
+            self._responder(mensagem, resultado)
+        elif operacao == Operacao.EXCLUIR_TOPICO:
+            resultado = self.server.armazenamento.excluir_topico(mensagem.campos["topico"])
+            self._responder(mensagem, resultado)
+        elif operacao == Operacao.PUBLICAR:
+            campos = mensagem.campos
+            resultado = self.server.armazenamento.publicar(
+                campos["uuid"], campos["topico"], campos["temperatura"],
+            )
+            try:
+                self._enviar(codificar(
+                    Operacao.ACK_PUBLICACAO, mensagem.id_solicitacao,
+                    uuid=campos["uuid"], resultado=resultado,
+                ))
+            finally:
+                if resultado == Resultado.OK:
+                    self.server.avisar_entregas()
         else:
-            self._recusar(mensagem, "Operacao ainda nao implementada nesta etapa")
+            self._recusar(mensagem, "Operacao inesperada do cliente")
 
     def _identificar(self, mensagem):
         cliente_id = mensagem.campos["cliente_id"]
@@ -142,18 +200,51 @@ class _Conexao(socketserver.BaseRequestHandler):
                 if cliente_id in self.server.clientes:
                     resultado = Resultado.CLIENTE_ID_EM_USO
                 else:
-                    self.server.clientes[cliente_id] = self.request
+                    self.server.clientes[cliente_id] = self
                     self.cliente_id = cliente_id
                     resultado = Resultado.OK
             if resultado == Resultado.OK:
                 self.server.armazenamento.registrar_cliente(cliente_id)
         self._responder(mensagem, resultado)
+        if resultado == Resultado.OK and self._emissor is None:
+            self._emissor = threading.Thread(
+                target=self._enviar_pendentes, name=f"broker-entregas-{cliente_id}",
+            )
+            self._emissor.start()
+
+    def _enviar_pendentes(self):
+        enviados = {}
+        try:
+            while not self._parar_envio.is_set() and not self.server.encerrando.is_set():
+                self._acordar_envio.clear()
+                pendentes = self.server.armazenamento.listar_entregas_pendentes(self.cliente_id)
+                atuais = {campos["uuid"] for campos in pendentes}
+                enviados = {uuid: prazo for uuid, prazo in enviados.items() if uuid in atuais}
+                for campos in pendentes:
+                    if self._parar_envio.is_set() or self.server.encerrando.is_set():
+                        return
+                    ultimo_envio = enviados.get(campos["uuid"])
+                    if ultimo_envio is None or monotonic() - ultimo_envio >= self.server.tempo_reenvio:
+                        self._enviar(codificar(Operacao.ENTREGAR, 0, **campos))
+                        enviados[campos["uuid"]] = monotonic()
+                self._acordar_envio.wait(self.server.tempo_reenvio)
+        except (OSError, sqlite3.Error):
+            LOG.debug("Envio interrompido para %s", self.cliente_id, exc_info=True)
+            try:
+                self.request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
 class BrokerTCP:
-    def __init__(self, host="127.0.0.1", porta=5000, banco="dados/broker.db"):
+    def __init__(
+        self, host="127.0.0.1", porta=5000, banco="dados/broker.db", *,
+        tempo_reenvio=TEMPO_REENVIO,
+    ):
+        if tempo_reenvio <= 0:
+            raise ValueError("O tempo de reenvio deve ser positivo")
         self.armazenamento = Armazenamento(banco)
-        self._servidor = _ServidorTCP((host, porta), self.armazenamento)
+        self._servidor = _ServidorTCP((host, porta), self.armazenamento, tempo_reenvio)
         self._thread = None
         self._fechado = False
 
