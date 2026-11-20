@@ -104,7 +104,7 @@ class TestBroker(unittest.TestCase):
             self.assertLess(time.monotonic(), limite, "Identificador nao foi liberado")
             time.sleep(0.01)
 
-    def test_publicacao_ainda_nao_recebe_ack_de_sucesso(self):
+    def test_publicacao_em_topico_inexistente_nao_recebe_ack_de_sucesso(self):
         conexao = self.conectar()
         self.identificar(conexao)
         conexao.sendall(codificar(
@@ -115,7 +115,7 @@ class TestBroker(unittest.TestCase):
         self.assertEqual(resposta.operacao, Operacao.ACK_PUBLICACAO)
         self.assertEqual(resposta.id_solicitacao, 7)
         self.assertEqual(resposta.campos["uuid"], UUID_PUBLICACAO)
-        self.assertEqual(resposta.campos["resultado"], Resultado.REQUISICAO_INVALIDA)
+        self.assertEqual(resposta.campos["resultado"], Resultado.TOPICO_INEXISTENTE)
 
     def test_prefixo_fora_do_limite_encerra_apenas_a_conexao_invalida(self):
         invalido = self.conectar()
