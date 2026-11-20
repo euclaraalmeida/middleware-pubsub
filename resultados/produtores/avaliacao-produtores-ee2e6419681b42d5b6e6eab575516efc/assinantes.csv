@@ -1,0 +1,2 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-produtores-ee2e6419681b42d5b6e6eab575516efc-a1,60,60,0,0,0,3,12.437473968110623,0.0694359000044642

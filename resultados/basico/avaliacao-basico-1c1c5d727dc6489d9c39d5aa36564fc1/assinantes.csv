@@ -1,0 +1,2 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-basico-1c1c5d727dc6489d9c39d5aa36564fc1-a1,20,20,0,0,0,1,5.877210036690842,0.014420899999095127

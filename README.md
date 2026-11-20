@@ -102,9 +102,9 @@ Os exemplos nao criam o topico automaticamente. Sem topico, as operacoes
 retornam `TOPICO_INEXISTENTE`. Sem inscritos, a publicacao e descartada com aviso.
 Use Ctrl+C para encerrar cada programa.
 
-O controle de capacidade de 10.000 mensagens, os scripts de carga e as metricas
-continuam para a etapa de sexta-feira. Esta entrega fecha quarta e quinta,
-sem mudar os clientes ou o protocolo compartilhado.
+Os comandos para os seis cenários de carga e as métricas coletadas estão
+em [docs/avaliacao.md](docs/avaliacao.md). A avaliação de saturação aguarda
+o limite global de 10.000 mensagens no broker.
 
 ## Organizacao
 
