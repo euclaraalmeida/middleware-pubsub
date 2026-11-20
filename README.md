@@ -47,12 +47,64 @@ ID de solicitacao. Cada cliente precisa se identificar antes de criar topicos.
 Um `cliente_id` simultaneo e recusado; uma desconexao libera o identificador
 sem apagar o cadastro persistente.
 
-As operacoes de publicacao, entrega, ACK de entrega, cancelamento e exclusao
-ainda nao estao implementadas. `PUBLICAR` recebe `ACK_PUBLICACAO` com
-`REQUISICAO_INVALIDA`, nunca um sucesso sem gravacao. Os demais comandos
-ainda indisponiveis recebem erro; mensagens de resposta ou entrega enviadas
-no sentido incorreto encerram a conexao. O fluxo completo sera integrado
-nas proximas etapas do cronograma.
+## Entrega de quarta-feira, 18/11
+
+O broker recebe `PUBLICAR` e grava a mensagem com seus destinatarios em uma
+transacao SQLite antes do `ACK_PUBLICACAO`. Sem inscritos, responde
+`DESCARTADA_SEM_INSCRITOS` e guarda somente o UUID e o resultado. Um topico
+inexistente recebe `TOPICO_INEXISTENTE`.
+
+Reenvios com o mesmo UUID repetem o resultado, sem acrescentar mensagens ou
+destinatarios. A selecao usa as inscricoes cadastradas, inclusive offline.
+Nesta etapa, elas podem ser preparadas pelo armazenamento para testar o
+publicador real de Clara; comandos de inscricao e entrega ficam para quinta.
+
+## Entrega de quinta-feira, 19/11
+
+O broker gerencia inscricoes e topicos pelo protocolo existente. Encaminha
+`ENTREGAR` com ID zero aos destinatarios gravados, inclusive apos reconexao.
+Cada cliente possui uma rotina de envio separada da recepcao de comandos.
+Respostas e entregas sao escritas no socket como quadros completos.
+
+O `ACK_ENTREGA` so confirma a pendencia do cliente identificado na conexao.
+Sem ACK, a entrega e reenviada apos cinco segundos. O conteudo so e removido
+apos todos os destinatarios confirmarem, mantendo UUID e resultado em disco.
+Cancelamento e exclusao com pendencias retornam os erros do protocolo.
+
+## Testar com os exemplos da Clara
+
+Execute os comandos da raiz do repositorio. Primeiro, em um terminal:
+
+```powershell
+python -m broker
+```
+
+Em outro terminal, prepare o topico uma vez:
+
+```powershell
+python -c "from client.assinante import Assinante; c = Assinante(cliente_id='preparacao'); c.conectar(); print(c.criar_topico('agua/temperatura').campos['resultado'].name); c.fechar()"
+```
+
+Inicie os paineis antes de publicar, cada um em seu terminal:
+
+```powershell
+python -m exemplos.painel_agua --cliente-id painel-agua-01
+python -m exemplos.painel_agua --cliente-id painel-agua-02
+```
+
+Em outro terminal, inicie o sensor:
+
+```powershell
+python -m exemplos.sensor_agua --cliente-id sensor-agua-01
+```
+
+Os exemplos nao criam o topico automaticamente. Sem topico, as operacoes
+retornam `TOPICO_INEXISTENTE`. Sem inscritos, a publicacao e descartada com aviso.
+Use Ctrl+C para encerrar cada programa.
+
+O controle de capacidade de 10.000 mensagens, os scripts de carga e as metricas
+continuam para a etapa de sexta-feira. Esta entrega fecha quarta e quinta,
+sem mudar os clientes ou o protocolo compartilhado.
 
 ## Organizacao
 
