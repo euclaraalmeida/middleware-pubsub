@@ -103,8 +103,36 @@ retornam `TOPICO_INEXISTENTE`. Sem inscritos, a publicacao e descartada com avis
 Use Ctrl+C para encerrar cada programa.
 
 Os comandos para os seis cenários de carga e as métricas coletadas estão
-em [docs/avaliacao.md](docs/avaliacao.md). A avaliação de saturação aguarda
-o limite global de 10.000 mensagens no broker.
+em [docs/avaliacao.md](docs/avaliacao.md).
+
+## Capacidade e verificacao do broker
+
+O limite padrao e de 10.000 leituras com entregas ainda pendentes. Uma leitura
+com varios destinatarios ocupa uma vaga. Uma nova publicacao espera espaco,
+sem ACK antecipado; o ultimo ACK de entrega libera a vaga. Reenvios de UUIDs
+ja aceitos continuam recebendo seu resultado mesmo com o banco cheio.
+
+Para ensaiar o limite com poucas leituras:
+
+```powershell
+python -m broker --banco dados/limite.db --capacidade 10
+python -m broker.estado --banco dados/limite.db
+```
+
+Execute a consulta em outro terminal. Ela le somente o banco, sem mudar o
+protocolo. O limite nao apaga pendencias antigas nem altera inscricoes offline.
+
+A verificacao abaixo inicia seu proprio broker e banco temporario, repete os
+seis cenarios da Clara, perde um ACK de publicacao de forma controlada e
+preenche as 10.000 vagas pela rede. Aguarde o termino; nao precisa abrir outro
+servidor. Os registros sao gravados em `resultados/broker/`.
+
+```powershell
+python -B -m testes.avaliar_broker
+```
+
+Veja [validacao do broker](docs/validacao_broker.md),
+[relatorio tecnico](docs/relatorio.md) e [andamento do cronograma](docs/cronograma.md).
 
 ## Organizacao
 

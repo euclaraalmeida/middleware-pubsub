@@ -1,0 +1,3 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-dois-assinantes-30415404b5a64614b709747687af21cf-a1,20,20,0,0,0,1,5.541701302299225,0.030999999999039574
+avaliacao-dois-assinantes-30415404b5a64614b709747687af21cf-a2,20,20,0,0,0,1,5.541701302299225,0.030999999999039574

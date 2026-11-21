@@ -1,0 +1,2 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-rajadas-cf23987f7a954638b6851bffea2b1941-a1,60,60,0,0,0,1,15.0,0.03200000000106229

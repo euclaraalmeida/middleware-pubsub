@@ -1,0 +1,1 @@
+Seis cenarios completos; perda real do primeiro ACK; retransmissao com mesmo UUID; saturacao TCP de 10.000 leituras; espera sem ACK; liberacao de uma vaga; reinicio com 10.000 pendencias e deduplicacao: OK.
