@@ -8,6 +8,9 @@ from uuid import UUID
 from shared.protocolo import Resultado
 
 
+CAPACIDADE_MENSAGENS = 10_000
+
+
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS clientes (
     cliente_id TEXT PRIMARY KEY NOT NULL CHECK (length(cliente_id) > 0)
@@ -49,7 +52,10 @@ CREATE TABLE IF NOT EXISTS identificadores_concluidos (
 
 
 class Armazenamento:
-    def __init__(self, caminho="dados/broker.db"):
+    def __init__(self, caminho="dados/broker.db", *, capacidade=CAPACIDADE_MENSAGENS):
+        if not isinstance(capacidade, int) or capacidade <= 0:
+            raise ValueError("A capacidade deve ser um inteiro positivo")
+        self.capacidade = capacidade
         self.caminho = Path(caminho)
         self.caminho.parent.mkdir(parents=True, exist_ok=True)
         with self._conexao() as conexao:
@@ -111,6 +117,7 @@ class Armazenamento:
             ]
 
     def publicar(self, mensagem_id, topico, temperatura):
+        """Retorna o resultado, ou None se uma nova leitura precisa esperar espaco."""
         with self._conexao() as conexao:
             # Reserva a escrita antes da consulta para serializar UUIDs concorrentes.
             conexao.execute("BEGIN IMMEDIATE")
@@ -139,6 +146,10 @@ class Armazenamento:
                     (mensagem_id.bytes, int(Resultado.DESCARTADA_SEM_INSCRITOS)),
                 )
                 return Resultado.DESCARTADA_SEM_INSCRITOS
+
+            quantidade = conexao.execute("SELECT COUNT(*) FROM mensagens").fetchone()[0]
+            if quantidade >= self.capacidade:
+                return None
 
             conexao.execute(
                 "INSERT INTO mensagens(mensagem_id, topico, temperatura) VALUES (?, ?, ?)",

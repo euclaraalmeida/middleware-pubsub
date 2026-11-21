@@ -18,7 +18,7 @@ from shared.protocolo import (
     decodificar,
 )
 
-from .armazenamento import Armazenamento
+from .armazenamento import CAPACIDADE_MENSAGENS, Armazenamento
 
 
 LOG = logging.getLogger(__name__)
@@ -77,6 +77,8 @@ class _Conexao(socketserver.BaseRequestHandler):
     def handle(self):
         self.cliente_id = None
         self._trava_envio = threading.Lock()
+        self._trava_publicacao = threading.Lock()
+        self._publicacao_pendente = None
         self._parar_envio = threading.Event()
         self._acordar_envio = threading.Event()
         self._emissor = None
@@ -138,10 +140,11 @@ class _Conexao(socketserver.BaseRequestHandler):
         if operacao == Operacao.ACK_ENTREGA:
             if self.cliente_id is None or mensagem.campos["cliente_id"] != self.cliente_id:
                 raise ErroProtocolo("ACK de entrega nao pertence a esta conexao")
-            self.server.armazenamento.confirmar_entrega(
+            confirmada = self.server.armazenamento.confirmar_entrega(
                 mensagem.campos["uuid"], self.cliente_id,
             )
-            self._acordar_envio.set()
+            if confirmada:
+                self.server.avisar_entregas()
             return
         if operacao in (
             Operacao.ENTREGAR, Operacao.ACK_PUBLICACAO, Operacao.RESPOSTA,
@@ -173,18 +176,22 @@ class _Conexao(socketserver.BaseRequestHandler):
             resultado = self.server.armazenamento.excluir_topico(mensagem.campos["topico"])
             self._responder(mensagem, resultado)
         elif operacao == Operacao.PUBLICAR:
-            campos = mensagem.campos
-            resultado = self.server.armazenamento.publicar(
-                campos["uuid"], campos["topico"], campos["temperatura"],
-            )
-            try:
-                self._enviar(codificar(
-                    Operacao.ACK_PUBLICACAO, mensagem.id_solicitacao,
-                    uuid=campos["uuid"], resultado=resultado,
-                ))
-            finally:
-                if resultado == Resultado.OK:
-                    self.server.avisar_entregas()
+            with self._trava_publicacao:
+                anterior = self._publicacao_pendente
+                if anterior is not None and anterior.campos["uuid"] != mensagem.campos["uuid"]:
+                    raise ErroProtocolo("Aguarde o ACK antes de publicar outra leitura")
+                campos = mensagem.campos
+                resultado = self.server.armazenamento.publicar(
+                    campos["uuid"], campos["topico"], campos["temperatura"],
+                )
+                if resultado is None:
+                    self._publicacao_pendente = mensagem
+                else:
+                    self._publicacao_pendente = None
+            if resultado is None:
+                self._acordar_envio.set()
+            else:
+                self._confirmar_publicacao(mensagem, resultado)
         else:
             self._recusar(mensagem, "Operacao inesperada do cliente")
 
@@ -212,11 +219,36 @@ class _Conexao(socketserver.BaseRequestHandler):
             )
             self._emissor.start()
 
+    def _publicar_pendente(self):
+        with self._trava_publicacao:
+            mensagem = self._publicacao_pendente
+            if mensagem is None:
+                return
+            campos = mensagem.campos
+            resultado = self.server.armazenamento.publicar(
+                campos["uuid"], campos["topico"], campos["temperatura"],
+            )
+            if resultado is None:
+                return
+            self._publicacao_pendente = None
+        self._confirmar_publicacao(mensagem, resultado)
+
+    def _confirmar_publicacao(self, mensagem, resultado):
+        try:
+            self._enviar(codificar(
+                Operacao.ACK_PUBLICACAO, mensagem.id_solicitacao,
+                uuid=mensagem.campos["uuid"], resultado=resultado,
+            ))
+        finally:
+            if resultado == Resultado.OK:
+                self.server.avisar_entregas()
+
     def _enviar_pendentes(self):
         enviados = {}
         try:
             while not self._parar_envio.is_set() and not self.server.encerrando.is_set():
                 self._acordar_envio.clear()
+                self._publicar_pendente()
                 pendentes = self.server.armazenamento.listar_entregas_pendentes(self.cliente_id)
                 atuais = {campos["uuid"] for campos in pendentes}
                 enviados = {uuid: prazo for uuid, prazo in enviados.items() if uuid in atuais}
@@ -228,8 +260,11 @@ class _Conexao(socketserver.BaseRequestHandler):
                         self._enviar(codificar(Operacao.ENTREGAR, 0, **campos))
                         enviados[campos["uuid"]] = monotonic()
                 self._acordar_envio.wait(self.server.tempo_reenvio)
-        except (OSError, sqlite3.Error):
-            LOG.debug("Envio interrompido para %s", self.cliente_id, exc_info=True)
+        except (OSError, sqlite3.Error) as erro:
+            if isinstance(erro, sqlite3.Error):
+                LOG.exception("Falha no armazenamento; encerrando conexao")
+            else:
+                LOG.debug("Envio interrompido para %s", self.cliente_id)
             try:
                 self.request.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -240,10 +275,11 @@ class BrokerTCP:
     def __init__(
         self, host="127.0.0.1", porta=5000, banco="dados/broker.db", *,
         tempo_reenvio=TEMPO_REENVIO,
+        capacidade=CAPACIDADE_MENSAGENS,
     ):
         if tempo_reenvio <= 0:
             raise ValueError("O tempo de reenvio deve ser positivo")
-        self.armazenamento = Armazenamento(banco)
+        self.armazenamento = Armazenamento(banco, capacidade=capacidade)
         self._servidor = _ServidorTCP((host, porta), self.armazenamento, tempo_reenvio)
         self._thread = None
         self._fechado = False
@@ -267,6 +303,7 @@ class BrokerTCP:
         if self._fechado:
             return
         self._servidor.encerrando.set()
+        self._servidor.avisar_entregas()
         if self._thread is not None:
             self._servidor.shutdown()
         with self._servidor.trava:
