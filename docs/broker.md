@@ -71,8 +71,49 @@ inscritos cadastrados naquele instante, como previsto no cronograma. Ao voltar
 com o mesmo cliente_id, o inscrito recebe suas pendencias. Um inscrito novo nao
 recebe leituras anteriores. Reiniciar o broker tambem preserva esse estado.
 
-O limite global de 10.000 mensagens e a avaliacao de carga permanecem para
-sexta-feira. Esta etapa nao altera a politica de retencao acordada pela equipe.
+## Capacidade
+
+O limite padrao e de 10.000 registros em `mensagens`, independentemente da
+quantidade de destinatarios de cada leitura. `--capacidade` permite reduzir
+esse numero em ensaios. A contagem e o INSERT ficam na mesma transacao
+`BEGIN IMMEDIATE`, impedindo que publicadores concorrentes excedam o limite.
+UUIDs conhecidos, descartes sem inscritos e erros de topico sao verificados
+antes da capacidade. Esses casos nao precisam aguardar uma vaga.
+
+Quando nao ha espaco, `Armazenamento.publicar` retorna `None` internamente.
+Isso nao e um novo resultado do protocolo. A conexao guarda um unico pedido
+de publicacao em espera, sem grava-lo ou confirmar sucesso. Reenvios do mesmo
+UUID atualizam o ID da tentativa aguardando resposta. O publicador deve esperar
+o ACK antes de enviar outra leitura, como ja faz a biblioteca da Clara.
+Enviar outro UUID enquanto esse pedido aguarda encerra somente a conexao
+infratora, evitando uma fila ilimitada de pedidos por conexao.
+
+A rotina de envio tenta novamente quando recebe um aviso de ACK ou quando
+vence o intervalo de verificacao, de cinco segundos. A rotina de recepcao
+continua disponivel para ACKs e comandos, inclusive se a mesma conexao publica
+e recebe leituras. A espera nao segura uma transacao SQLite nem o lock global
+de clientes. A publicacao e confirmada apenas depois do commit.
+
+Os destinatarios sao selecionados na transacao que aceita a leitura. Antes
+disso o pedido ainda esta em espera. O ultimo ACK de cada leitura remove o
+conteudo e libera uma vaga; ACKs parciais nao a liberam. Ao reabrir o banco,
+a capacidade e consultada nos registros existentes, sem um contador em RAM
+que precise ser reconstruido. Se um banco ja tiver mais registros que o novo
+limite configurado, eles sao preservados e novas leituras aguardam.
+
+Ao perder a conexao ou encerrar o broker, um pedido ainda nao aceito pode ser
+descartado no servidor. O sensor continua responsavel por sua copia RAM e
+deve reenviar o mesmo UUID. Se a gravacao ja ocorreu, a deduplicacao devolve
+o resultado persistido. A politica de retencao das inscricoes offline permanece.
+
+## Observacao
+
+`python -m broker.estado --banco dados/broker.db` abre o SQLite em modo
+somente leitura. Mostra leituras pendentes, entregas individuais sem ACK e
+UUIDs concluidos. Uma leitura para dois inscritos pode representar uma
+mensagem e duas entregas pendentes. `concluidas` inclui descartes sem inscritos
+e leituras cujos destinatarios todos confirmaram; nao e um contador de ACKs
+individuais. O comando nao cria bancos ausentes.
 
 A exclusao de mensagens remove suas entregas por chave estrangeira; ela nao
 remove os identificadores concluidos. Essa exclusao so devera ser chamada
@@ -89,3 +130,4 @@ ou inscricoes nao sao apagados automaticamente pelo banco.
 - Criar o topico antes de iniciar os exemplos de painel e sensor.
 - A documentacao de cliente da Clara ainda descreve limites da base de terca;
   ela pode atualizar esse status com os resultados da integracao, sem mudar a API.
+- A validacao completa do broker esta em `docs/validacao_broker.md`.
