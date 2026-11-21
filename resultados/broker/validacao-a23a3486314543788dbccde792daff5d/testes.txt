@@ -1,0 +1,20 @@
+Validacao local em 21/11/2026
+Python 3.11.9, Windows. Fontes identificadas em manifesto.txt.
+
+Comando:
+python -B -m unittest discover -s testes -v
+
+Resultado:
+Ran 77 tests in 20.963s
+OK
+
+A suite e o inicio da integracao foram executados em paralelo, com bancos
+e portas separados. Os tempos nao sao uma comparacao de desempenho.
+Avisos de conexao perdida durante o teste de reinicio sao esperados.
+
+Comando complementar:
+python -B -m testes.avaliar_broker
+
+Resultado: todas as verificacoes concluidas, conforme verificacoes.txt,
+saturacao.csv e os CSVs de cada cenario. Os seis cenarios originais da
+Clara, seu avaliador e seus resultados anteriores foram preservados.

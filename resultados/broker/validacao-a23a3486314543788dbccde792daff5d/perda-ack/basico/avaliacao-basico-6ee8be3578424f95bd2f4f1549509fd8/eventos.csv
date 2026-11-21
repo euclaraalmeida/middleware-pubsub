@@ -1,0 +1,11 @@
+evento,tempo_s,cliente,uuid,solicitacao,resultado,fila,latencia_s,detalhe
+inicio,0.3280000000013388,,,,,,,
+enfileirada,0.3280000000013388,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-p1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,,,1,,
+envio,0.3280000000013388,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-p1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,2,,1,,
+chegada,0.35900000000037835,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-a1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,,,,0.030999999999039574,
+consumo,0.35900000000037835,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-a1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,,,,,
+envio,5.328000000001339,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-p1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,3,,1,,
+ack,5.34400000000096,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-p1,04ac26b6-1f3f-45b1-bc72-19eb9d12ce39,3,OK,,0.01599999999962165,
+pendencias_saida,5.34400000000096,avaliacao-basico-6ee8be3578424f95bd2f4f1549509fd8-p1,,,,0,,
+fim_publicacoes,5.34400000000096,,,,,,,
+fim,6.5,,,,,,,

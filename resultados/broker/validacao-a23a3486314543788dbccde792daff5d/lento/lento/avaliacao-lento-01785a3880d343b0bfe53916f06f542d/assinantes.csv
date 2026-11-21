@@ -1,0 +1,3 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-lento-01785a3880d343b0bfe53916f06f542d-a1,20,20,0,0,0,1,5.245213742462368,0.031500000002779416
+avaliacao-lento-01785a3880d343b0bfe53916f06f542d-a2,20,20,0,0,0,11,5.245213742462368,0.030999999999039574

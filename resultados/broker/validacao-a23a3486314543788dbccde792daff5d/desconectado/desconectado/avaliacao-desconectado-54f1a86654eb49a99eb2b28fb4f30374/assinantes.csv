@@ -1,0 +1,3 @@
+cliente,recebidas,consumidas,reentregas,esperadas_nao_observadas,pendentes_consumo,pico_fila_entrada,recebidas_por_s,latencia_chegada_mediana_s
+avaliacao-desconectado-54f1a86654eb49a99eb2b28fb4f30374-a1,20,20,0,0,0,1,5.517241379310345,0.031000000000858563
+avaliacao-desconectado-54f1a86654eb49a99eb2b28fb4f30374-a2,20,20,0,0,0,1,5.517241379310345,0.18800000000010186
